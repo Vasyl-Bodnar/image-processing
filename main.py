@@ -13,50 +13,107 @@ gray_ivy = cv2.cvtColor(ivy, cv2.COLOR_BGR2GRAY)
 gray_ivy2 = cv2.cvtColor(ivy2, cv2.COLOR_BGR2GRAY)
 gray_oak_atln = cv2.cvtColor(oak_atln, cv2.COLOR_BGR2GRAY)
 gray_oak_east = cv2.cvtColor(oak_east, cv2.COLOR_BGR2GRAY)
+# apple = cv2.imread("orig/apple.jpg")
+# apple = cv2.cvtColor(apple, cv2.COLOR_BGR2GRAY)
 
 
-def multilevel_threshold(img, threshold_values):
+def multilevel_thresh(img, threshold_values):
     img[img < threshold_values[0]] = 0
     img[(img < threshold_values[1]) & (img > 0)] = 125
     img[img > 125] = 255
     return img
 
 
+def adaptive_thresh(img, split=11):
+    return cv2.adaptiveThreshold(
+        img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, split, 2
+    )
+
+
 def global_thresh(img, T):
     return (cv2.threshold(img, T, 255, cv2.THRESH_BINARY))[1]
 
 
-def local_threshold(gray, T, window_size=11):
-    height, width = gray.shape
-    half_size = window_size // 2
-    padding_size = half_size + 1
-    gray = cv2.copyMakeBorder(
-        gray, padding_size, padding_size, padding_size, padding_size, cv2.BORDER_REFLECT
-    )
-    output = np.zeros((height, width), dtype=np.uint8)
-    for i in range(padding_size, height + padding_size):
-        for j in range(padding_size, width + padding_size):
-            window = gray[
-                i - half_size:i + half_size + 1, j - half_size:j + half_size + 1
-            ]
-            _, threshold = cv2.threshold(
-                window, T, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+def niblack(img, window_size=30, k=-0.3):
+    mean = cv2.blur(img, (window_size, window_size))
+    variance = cv2.boxFilter(
+        np.square(img), -1, (window_size, window_size)
+    ) - np.square(mean)
+    threshold = mean + k * np.sqrt(variance)
+    binary = img >= threshold
+    return binary.astype(np.uint8) * 255
+
+
+def bernsen(img, window_size=30, c=15):
+    min_vals = cv2.erode(img, np.ones((window_size, window_size)))
+    max_vals = cv2.dilate(img, np.ones((window_size, window_size)))
+    contrast = max_vals - min_vals
+    threshold = np.where(contrast <= c, (min_vals + max_vals) // 2, img > max_vals / 2)
+    binary = threshold.astype(np.uint8) * 255
+    return binary
+
+def sauvola(image, window_size=30, k=0.34, r=128):
+    mean = cv2.blur(image, (window_size, window_size))
+    variance = cv2.boxFilter(np.square(image), -1, (window_size, window_size)) - np.square(mean)
+    std_dev = np.sqrt(np.maximum(variance, 0))
+    threshold = mean * (1 + k * ((std_dev / r) - 1))
+    binary = image >= threshold
+    return binary.astype(np.uint8) * 255
+
+
+def write_global_t(img, name, vs):
+    for v in vs:
+        cv2.imwrite("segment/global-v{}-{}.png".format(v, name), global_thresh(img, v))
+
+
+def write_adaptive_t(img, name, ss):
+    for s in ss:
+        cv2.imwrite(
+            "segment/adaptive-s{}-{}.png".format(s, name), adaptive_thresh(img, s)
+        )
+
+
+def write_niblack_t(img, name, win_sizes, ks):
+    for w in win_sizes:
+        for k in ks:
+            cv2.imwrite(
+                "segment/niblack-w{}-k{}-{}.png".format(w, k, name), niblack(img, w, k)
             )
-            output[i - padding_size, j - padding_size] = threshold[half_size, half_size]
-    return output
 
 
-def niblack(gray, win_size=30, k=-0.3):
-    mean = cv2.blur(gray, (win_size, win_size))
-    stddev = np.sqrt(cv2.blur(gray * gray, (win_size, win_size)) - mean * mean)
-    threshold = mean + k * stddev
-    bin_img = np.zeros_like(gray)
-    bin_img[gray >= threshold] = 255
-    return bin_img
+def write_bernsen_t(img, name, win_sizes, cs):
+    for w in win_sizes:
+        for c in cs:
+            cv2.imwrite(
+                "segment/bernsen-w{}-c{}-{}.png".format(w, c, name), bernsen(img, w, c)
+            )
 
 
-plt.imshow(global_thresh(gray_oak_atln, 160), cmap="gray")
-plt.show()
+def write_sauvola_t(img, name, win_sizes, ks):
+    for w in win_sizes:
+        for k in ks:
+            cv2.imwrite(
+                "segment/sauvola-w{}-k{}-{}.png".format(w, k, name), sauvola(img, w, k)
+            )
+
+def multi_multi_t(img, name, vps):
+    for v,u in vps:
+        cv2.imwrite(
+            "segment/multi-v({},{})-{}.png".format(v, u, name), multilevel_thresh(img.copy(), (v, u))
+        )
+
+
+
+# write_global_t(gray_oak_atln, "oak_atln", [15, 45, 75, 125, 200])
+# multi_multi_t(gray_ivy, "ivy", [(5, 120), (30, 70), (45, 135), (5, 35)])
+# multi_multi_t(gray_ivy2, "ivy2", [(30, 100), (30, 163), (63, 135), (150, 235)])
+# write_adaptive_t(gray_oak_atln, "oak_atln", [3, 5, 9, 15, 35, 65])
+# write_niblack_t(gray_oak_atln, "oak_atln", [15, 30, 60, 100], [-0.2, -0.3, -0.6])
+#write_niblack_t(gray_ivy, "ivy", [15, 30, 60, 100, 300], [-0.2, -0.3, -0.6])
+# write_bernsen_t(gray_oak_atln, "oak_atln", [15, 30, 60, 100, 300], [15, 20, 40])
+# write_sauvola_t(gray_oak_atln, "oak_atln", [15, 30, 60, 100, 300], [0.2, 0.34, 0.5])
+# plt.imshow(sauvola(gray_ivy), cmap="gray")
+# plt.show()
 
 # dst_med(gray_ivy, "ivy")
 # # wrt.median_filter(gray_ivy2, "ivy2")
@@ -292,3 +349,47 @@ plt.show()
 # axis[0].hist(hist_equal(gray_ivy2))
 # axis[1].hist(gray_ivy2)
 # plt.show()
+# def best_t(f):
+# T = 0.5*(np.min(f) + np.max(f))
+
+## Initialize done to False
+# done = False
+
+## Loop until done is True
+# while not done:
+## Binarize the image based on the current threshold
+# g = f >= T
+
+## Calculate the mean intensity values of the foreground and background regions
+# foreground_mean = np.mean(f[g])
+# background_mean = np.mean(f[~g])
+
+## Calculate the next threshold value
+# Tnext = 0.5*(foreground_mean + background_mean)
+
+## Check if the difference between T and Tnext is greater than 0.5
+# if abs(T - Tnext) > 0.5:
+## Update T and continue the loop
+# T = Tnext
+# else:
+## Exit the loop
+# done = True
+# return T
+# def local_threshold(gray, T, window_size=11):
+# height, width = gray.shape
+# half_size = window_size // 2
+# padding_size = half_size + 1
+# gray = cv2.copyMakeBorder(
+# gray, padding_size, padding_size, padding_size, padding_size, cv2.BORDER_REFLECT
+# )
+# output = np.zeros((height, width), dtype=np.uint8)
+# for i in range(padding_size, height + padding_size):
+# for j in range(padding_size, width + padding_size):
+# window = gray[
+# i - half_size:i + half_size + 1, j - half_size:j + half_size + 1
+# ]
+# _, threshold = cv2.threshold(
+# window, T, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+# )
+# output[i - padding_size, j - padding_size] = threshold[half_size, half_size]
+# return output

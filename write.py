@@ -140,7 +140,7 @@ def median_filter(img, name, kernels=[3, 7, 15]):
         cv2.imwrite("enhance/med{}_{}.png".format(k, name), cv2.medianBlur(img, k))
         cv2.imwrite(
             "enhance/med{}_gauss{}-{}_{}.png".format(k, 1, 50, name),
-            cv2.medianBlur(gauss, k),
+            cv2.medianblur(gauss, k),
         )
         cv2.imwrite(
             "enhance/med{}_s&p{}_{}.png".format(k, 0.05, name), cv2.medianBlur(sp, k)
