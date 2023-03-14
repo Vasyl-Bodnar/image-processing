@@ -1,6 +1,10 @@
+'''
+TODO: Clean up "##OLD"
+'''
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
+import scipy
 
 import algos as alg
 import write as wrt
@@ -13,103 +17,96 @@ gray_ivy = cv2.cvtColor(ivy, cv2.COLOR_BGR2GRAY)
 gray_ivy2 = cv2.cvtColor(ivy2, cv2.COLOR_BGR2GRAY)
 gray_oak_atln = cv2.cvtColor(oak_atln, cv2.COLOR_BGR2GRAY)
 gray_oak_east = cv2.cvtColor(oak_east, cv2.COLOR_BGR2GRAY)
-# apple = cv2.imread("orig/apple.jpg")
-# apple = cv2.cvtColor(apple, cv2.COLOR_BGR2GRAY)
+apple = cv2.imread("orig/apple.jpg")
+apple = cv2.cvtColor(apple, cv2.COLOR_BGR2GRAY)
 
 
-def multilevel_thresh(img, threshold_values):
-    img[img < threshold_values[0]] = 0
-    img[(img < threshold_values[1]) & (img > 0)] = 125
-    img[img > 125] = 255
-    return img
+## OLD
+# cv2.imwrite("enhance/gaussfilt3-s2_oak_atln.png", cv2.GaussianBlur(gray_oak_atln, (3,3), sigmaX=2))
+# alg.save_hist(cv2.GaussianBlur(gray_oak_atln, (3,3), sigmaX=2), "gaussfilt3-s2_oak_atln.png")
 
+#write_hist_hog(gray_oak_atln, "oak_atln", [2.0, 3.0, 5.0], [5, 15, 2])
+#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 20)
+#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 40)
+#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 128)
+#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 60)
+#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 80)
+#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 100)
+#write_hist_robinson(gray_oak_atln, "oak_atln", 30)
+#write_hist_robinson(gray_oak_atln, "oak_atln", 50)
+#write_hist_robinson(gray_oak_atln, "oak_atln", 100)
+#write_hist_robinson(gray_oak_atln, "oak_atln", 150)
 
-def adaptive_thresh(img, split=11):
-    return cv2.adaptiveThreshold(
-        img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, split, 2
-    )
+#write_hist_hog(gray_ivy, "ivy", [2.0, 3.0, 5.0], [5, 15, 2])
+#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 20)
+#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 40)
+#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 128)
+#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 60)
+#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 80)
+#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 100)
+#write_hist_robinson(gray_ivy, "ivy", 30)
+#write_hist_robinson(gray_ivy, "ivy", 50)
+#write_hist_robinson(gray_ivy, "ivy", 100)
+#write_hist_robinson(gray_ivy, "ivy", 150)
 
+#write_hist_hog(gray_ivy2, "ivy2", [2.0, 3.0, 5.0], [5, 15, 2])
+#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 20)
+#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 40)
+#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 128)
+#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 60)
+#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 80)
+#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 100)
+#write_hist_robinson(gray_ivy2, "ivy2", 30)
+#write_hist_robinson(gray_ivy2, "ivy2", 50)
+#write_hist_robinson(gray_ivy2, "ivy2", 100)
+#write_hist_robinson(gray_ivy2, "ivy2", 150)
 
-def global_thresh(img, T):
-    return (cv2.threshold(img, T, 255, cv2.THRESH_BINARY))[1]
+# write_hist_canny(oak_atln, "oak_atln", 20, 120)
+# write_hist_canny(oak_atln, "oak_atln", 20, 200)
+# write_hist_canny(oak_atln, "oak_atln", 30, 60)
+# write_hist_canny(oak_atln, "oak_atln", 50)
+# write_hist_canny(oak_atln, "oak_atln", 100, 200)
+# write_hist_canny(oak_atln, "oak_atln", 180, 220)
+# write_hist_canny(oak_atln, "oak_atln", 80, 250)
 
+# write_hist_hog(gray_oak_atln, "oak_atln", [1.5, 2.0, 5.0], [5,15,2])
+# write_laplacian_et_gauss(gray_ivy2, "ivy2", [1, 2, 3, 4], [15])
+# write_laplacian_et_gauss(gray_ivy, "ivy", [1, 2, 3, 4], [15])
+# show_laplacian(gray_ivy2, 1)
+# show_gaussian_edge(gray_ivy2, 1)
+# plt.show()
+# write_hist_hog(gray_ivy, "ivy", [1.5, 2.0, 5.0], [5,15,2])
+# write_double_hog(gray_ivy, "ivy", [(1.5, 120), (2, 120)])
+# write_hist_robinson(gray_ivy, "ivy", 30)
+# write_hist_robinson(gray_ivy, "ivy", 50)
+# write_hist_robinson(gray_ivy, "ivy", 100)
+# write_hist_robinson(gray_ivy, "ivy", 150)
 
-def niblack(img, window_size=30, k=-0.3):
-    mean = cv2.blur(img, (window_size, window_size))
-    variance = cv2.boxFilter(
-        np.square(img), -1, (window_size, window_size)
-    ) - np.square(mean)
-    threshold = mean + k * np.sqrt(variance)
-    binary = img >= threshold
-    return binary.astype(np.uint8) * 255
+# write_hist_canny(gray_ivy, "ivy", 20, 120)
+# write_hist_canny(gray_ivy, "ivy", 20, 200)
+# write_hist_canny(gray_ivy, "ivy", 30, 60)
+# write_hist_canny(gray_ivy, "ivy", 50)
+# write_hist_canny(gray_ivy, "ivy", 100, 200)
+# write_hist_canny(gray_ivy, "ivy", 180, 220)
+# write_hist_canny(gray_ivy, "ivy", 80, 250)
 
-
-def bernsen(img, window_size=30, c=15):
-    min_vals = cv2.erode(img, np.ones((window_size, window_size)))
-    max_vals = cv2.dilate(img, np.ones((window_size, window_size)))
-    contrast = max_vals - min_vals
-    threshold = np.where(contrast <= c, (min_vals + max_vals) // 2, img > max_vals / 2)
-    binary = threshold.astype(np.uint8) * 255
-    return binary
-
-def sauvola(image, window_size=30, k=0.34, r=128):
-    mean = cv2.blur(image, (window_size, window_size))
-    variance = cv2.boxFilter(np.square(image), -1, (window_size, window_size)) - np.square(mean)
-    std_dev = np.sqrt(np.maximum(variance, 0))
-    threshold = mean * (1 + k * ((std_dev / r) - 1))
-    binary = image >= threshold
-    return binary.astype(np.uint8) * 255
-
-
-def write_global_t(img, name, vs):
-    for v in vs:
-        cv2.imwrite("segment/global-v{}-{}.png".format(v, name), global_thresh(img, v))
-
-
-def write_adaptive_t(img, name, ss):
-    for s in ss:
-        cv2.imwrite(
-            "segment/adaptive-s{}-{}.png".format(s, name), adaptive_thresh(img, s)
-        )
-
-
-def write_niblack_t(img, name, win_sizes, ks):
-    for w in win_sizes:
-        for k in ks:
-            cv2.imwrite(
-                "segment/niblack-w{}-k{}-{}.png".format(w, k, name), niblack(img, w, k)
-            )
-
-
-def write_bernsen_t(img, name, win_sizes, cs):
-    for w in win_sizes:
-        for c in cs:
-            cv2.imwrite(
-                "segment/bernsen-w{}-c{}-{}.png".format(w, c, name), bernsen(img, w, c)
-            )
-
-
-def write_sauvola_t(img, name, win_sizes, ks):
-    for w in win_sizes:
-        for k in ks:
-            cv2.imwrite(
-                "segment/sauvola-w{}-k{}-{}.png".format(w, k, name), sauvola(img, w, k)
-            )
-
-def multi_multi_t(img, name, vps):
-    for v,u in vps:
-        cv2.imwrite(
-            "segment/multi-v({},{})-{}.png".format(v, u, name), multilevel_thresh(img.copy(), (v, u))
-        )
-
-
+# show_laplacian(apple)
+# show_gaussian_edge(apple, 3, 2, 0)
+# write_hist_gauss_sobel(gray_ivy, "ivy", 3, 2, 20)
+# write_hist_gauss_sobel(gray_ivy, "ivy", 3, 2, 40)
+# write_hist_gauss_sobel(gray_ivy, "ivy", 3, 2, 128)
+# write_hist_gauss_sobel(gray_ivy, "ivy", 3, 2, 60)
+# write_hist_gauss_sobel(gray_ivy, "ivy", 3, 2, 80)
+# write_hist_gauss_sobel(gray_ivy, "ivy", 3, 2, 100)
+# cv2.imwrite("enhance/gaussfilt3-s2_ivy.png", cv2.GaussianBlur(gray_ivy, (3,3), sigmaX=2))
+# alg.save_hist(cv2.GaussianBlur(gray_ivy, (3,3), sigmaX=2), "gaussfilt3-s2_ivy.png")
 
 # write_global_t(gray_oak_atln, "oak_atln", [15, 45, 75, 125, 200])
 # multi_multi_t(gray_ivy, "ivy", [(5, 120), (30, 70), (45, 135), (5, 35)])
 # multi_multi_t(gray_ivy2, "ivy2", [(30, 100), (30, 163), (63, 135), (150, 235)])
 # write_adaptive_t(gray_oak_atln, "oak_atln", [3, 5, 9, 15, 35, 65])
 # write_niblack_t(gray_oak_atln, "oak_atln", [15, 30, 60, 100], [-0.2, -0.3, -0.6])
-#write_niblack_t(gray_ivy, "ivy", [15, 30, 60, 100, 300], [-0.2, -0.3, -0.6])
+# write_niblack_t(gray_ivy, "ivy", [15, 30, 60, 100, 300], [-0.2, -0.3, -0.6])
 # write_bernsen_t(gray_oak_atln, "oak_atln", [15, 30, 60, 100, 300], [15, 20, 40])
 # write_sauvola_t(gray_oak_atln, "oak_atln", [15, 30, 60, 100, 300], [0.2, 0.34, 0.5])
 # plt.imshow(sauvola(gray_ivy), cmap="gray")

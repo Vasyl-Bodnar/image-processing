@@ -1,15 +1,193 @@
+"""
+TODO: Reference functions that were borrowed
+     Clean up the functions
+"""
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
+import skimage as si
+from skimage import filters
+
+
+def any_neighbor_zero(img, i, j):
+    for k in range(-1, 2):
+        for l in range(-1, 2):
+            if img[i + k, j + k] == 0:
+                return True
+    return False
+
+
+def zero_crossing(img):
+    img[img > 0] = 1
+    img[img < 0] = 0
+    out_img = np.zeros(img.shape)
+    for i in range(1, img.shape[0] - 1):
+        for j in range(1, img.shape[1] - 1):
+            if img[i, j] > 0 and any_neighbor_zero(img, i, j):
+                out_img[i, j] = 255
+    return out_img
+
+
+def laplacian(img, s=1, T=30):
+    smoothed = si.filters.gaussian(img, s)
+    laplacian = cv2.Laplacian(smoothed, cv2.CV_64F)
+    x, y = laplacian.shape
+    edges = np.zeros((x, y))
+    w = edges.shape[1]
+    h = edges.shape[0]
+    for n in range(0, x):
+        for m in range(0, y):
+            if laplacian[n, m] > 0:
+                edges[n, m] = 255
+            elif laplacian[n, m] < 0:
+                edges[n, m] = -255
+    for y in range(1, h - 1):
+        for x in range(1, w - 1):
+            patch = laplacian[y : y + 2, x : x + 1]
+            p = laplacian[y, x]
+            maxP = patch.max()
+            minP = patch.min()
+            if p > 0:
+                zeroCross = True if minP < 0 else False
+            else:
+                zeroCross = True if minP > 0 else False
+            if ((maxP - minP) > T) and zeroCross:
+                edges[y, x] = 255
+    return smoothed * 255, laplacian * 255, edges  # type:ignore
+
+
+def gaussian_edge(img, s=2, T=50):
+    smoothed = si.filters.gaussian(img, s)
+    sigma = s
+    x, y = np.meshgrid(
+        np.linspace(-3 * sigma, 3 * sigma, 7), np.linspace(-3 * sigma, 3 * sigma, 7)
+    )
+    g = -((x**2 + y**2 - 2 * sigma**2) / (2 * np.pi * sigma**4)) * np.exp(
+        -(x**2 + y**2) / (2 * sigma**2)
+    )
+    laplacian = cv2.filter2D(smoothed, -1, g)
+    x, y = laplacian.shape
+    edges = np.zeros((x, y))
+    w = edges.shape[1]
+    h = edges.shape[0]
+    for n in range(0, x):
+        for m in range(0, y):
+            if laplacian[n, m] > 0:
+                edges[n, m] = 255
+            elif laplacian[n, m] < 0:
+                edges[n, m] = 0
+    for y in range(1, h - 1):
+        for x in range(1, w - 1):
+            patch = laplacian[y : y + 2, x : x + 1]
+            p = laplacian[y, x]
+            maxP = patch.max()
+            minP = patch.min()
+            if p > 0:
+                zeroCross = True if minP < 0 else False
+            else:
+                zeroCross = True if minP > 0 else False
+            if ((maxP - minP) > T) and zeroCross:
+                edges[y, x] = 255
+    return smoothed * 255, laplacian * 255, edges  # type: ignore
+
+
+def sobel(img, T):
+    sobelx = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=3)
+    mag = np.sqrt(sobelx**2 + sobely**2)
+    ang = np.arctan2(sobely, sobelx) * 180 / np.pi
+    return sobelx, sobely, mag, ang, global_thresh(mag, T)
+
+
+def canny(img, T1, T2=None):
+    return cv2.Canny(img, T1, T1 * 3 if T2 is None else T2)
+
+
+def robinson(img, T):
+    kernels = [
+        np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]]),  # N-S
+        np.array([[0, 1, 2], [-1, 0, 1], [-2, -1, 0]]),  # NE-SW
+        np.array([[1, 2, 1], [0, 0, 0], [-1, -2, -1]]),  # E-W
+        np.array([[2, 1, 0], [1, 0, -1], [0, -1, -2]]),  # SE-NW
+        np.array([[1, 0, -1], [2, 0, -2], [1, 0, -1]]),  # S-N
+        np.array([[0, -1, -2], [1, 0, -1], [2, 1, 0]]),  # SW-NE
+        np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]]),  # W-E
+        np.array([[-2, -1, 0], [-1, 0, 1], [0, 1, 2]]),  # NW-SE
+    ]
+    mag = np.zeros_like(img)
+    ang = np.zeros_like(img)
+    for kernel in kernels:
+        conv = cv2.filter2D(img, -1, kernel)
+        mag = np.maximum(mag, conv)
+        ang[conv == mag] = np.arctan2(kernel[1, 0], kernel[0, 0])
+    return mag, ang, global_thresh(mag, T)
+
+
+def hog(img):
+    return si.feature.hog(img, visualize=True)[1]
+
+
+def multilevel_thresh(img, threshold_values):
+    img[img < threshold_values[0]] = 0
+    img[(img < threshold_values[1]) & (img > 0)] = 125
+    img[img > 125] = 255
+    return img
+
+
+def adaptive_thresh(img, split=11):
+    return cv2.adaptiveThreshold(
+        img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, split, 2
+    )
+
+
+def otsu(img):
+    return cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+
+def global_thresh(img, T):
+    # Could also just been zeroes[img >= T] = 255
+    return (cv2.threshold(img, T, 255, cv2.THRESH_BINARY))[1]
+
+
+def niblack(img, window_size=30, k=-0.3):
+    mean = cv2.blur(img, (window_size, window_size))
+    variance = cv2.boxFilter(
+        np.square(img), -1, (window_size, window_size)
+    ) - np.square(mean)
+    threshold = mean + k * np.sqrt(variance)
+    binary = img >= threshold
+    return binary.astype(np.uint8) * 255
+
+
+def bernsen(img, window_size=30, c=15):
+    min_vals = cv2.erode(img, np.ones((window_size, window_size)))
+    max_vals = cv2.dilate(img, np.ones((window_size, window_size)))
+    contrast = max_vals - min_vals
+    threshold = np.where(contrast <= c, (min_vals + max_vals) // 2, img > max_vals / 2)
+    binary = threshold.astype(np.uint8) * 255
+    return binary
+
+
+def sauvola(image, window_size=30, k=0.34, r=128):
+    mean = cv2.blur(image, (window_size, window_size))
+    variance = cv2.boxFilter(
+        np.square(image), -1, (window_size, window_size)
+    ) - np.square(mean)
+    std_dev = np.sqrt(np.maximum(variance, 0))
+    threshold = mean * (1 + k * ((std_dev / r) - 1))
+    binary = image >= threshold
+    return binary.astype(np.uint8) * 255
 
 
 def alpha_trim_mean(img, alpha=2, kernels=[5, 7]):
     result = []
     for k in kernels:
         filtered = np.zeros_like(img)
-        for i in range(k//2, img.shape[0]-k//2):
-            for j in range(k//2, img.shape[1]-k//2):
-                neighborhood = img[i-k//2:i+k//2+1, j-k//2:j+k//2+1]
+        for i in range(k // 2, img.shape[0] - k // 2):
+            for j in range(k // 2, img.shape[1] - k // 2):
+                neighborhood = img[
+                    i - k // 2 : i + k // 2 + 1, j - k // 2 : j + k // 2 + 1
+                ]
                 flat_neighborhood = neighborhood.flatten()
                 sorted_neighborhood = np.sort(flat_neighborhood)
                 trimmed_neighborhood = sorted_neighborhood[alpha:-alpha]
@@ -19,18 +197,36 @@ def alpha_trim_mean(img, alpha=2, kernels=[5, 7]):
     return result
 
 
-def weighted_median(img, kernels=[(3, np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]])),
-                                  (7, np.array([[1, 1, 1, 1, 1, 1, 1], [1, 2, 2, 2, 2, 2, 1],
-                                                [1, 2, 3, 3, 3, 2, 1], [1, 2, 3, 4, 3, 2, 1],
-                                                [1, 2, 3, 3, 3, 2, 1], [1, 2, 2, 2, 2, 2, 1],
-                                                [1, 1, 1, 1, 1, 1, 1]]))]):
+def weighted_median(
+    img,
+    kernels=[
+        (3, np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]])),
+        (
+            7,
+            np.array(
+                [
+                    [1, 1, 1, 1, 1, 1, 1],
+                    [1, 2, 2, 2, 2, 2, 1],
+                    [1, 2, 3, 3, 3, 2, 1],
+                    [1, 2, 3, 4, 3, 2, 1],
+                    [1, 2, 3, 3, 3, 2, 1],
+                    [1, 2, 2, 2, 2, 2, 1],
+                    [1, 1, 1, 1, 1, 1, 1],
+                ]
+            ),
+        ),
+    ],
+):
     result = []
     for kernel in kernels:
         filtered = np.zeros_like(img)
         window_size, weight_kernel = kernel
-        for i in range(window_size // 2, img.shape[0]-window_size // 2):
-            for j in range(window_size // 2, img.shape[1]-window_size // 2):
-                neighborhood = img[i-window_size//2:i+window_size//2+1, j-window_size//2:j+window_size//2+1]
+        for i in range(window_size // 2, img.shape[0] - window_size // 2):
+            for j in range(window_size // 2, img.shape[1] - window_size // 2):
+                neighborhood = img[
+                    i - window_size // 2 : i + window_size // 2 + 1,
+                    j - window_size // 2 : j + window_size // 2 + 1,
+                ]
                 flat_neighborhood = neighborhood.flatten()
                 flat_weights = weight_kernel.flatten()
                 sorted_indices = np.argsort(flat_neighborhood)
@@ -88,43 +284,61 @@ def wf_3x3(img):
 
 
 def wf_7x7(img):
-    return weighted_filter(img, 7, [[1, 1, 2, 2, 4, 2, 2, 1, 1],
-                                    [1, 2, 2, 4, 8, 4, 2, 2, 1],
-                                    [2, 2, 4, 8, 16, 8, 4, 2, 2],
-                                    [2, 4, 8, 16, 32, 16, 8, 4, 2],
-                                    [4, 8, 16, 32, 64, 32, 16, 8, 4],
-                                    [2, 4, 8, 16, 32, 16, 8, 4, 2],
-                                    [1, 2, 2, 4, 8, 4, 2, 2, 1],
-                                    [1, 1, 2, 2, 4, 2, 2, 1, 1]])
+    return weighted_filter(
+        img,
+        7,
+        [
+            [1, 1, 2, 2, 4, 2, 2, 1, 1],
+            [1, 2, 2, 4, 8, 4, 2, 2, 1],
+            [2, 2, 4, 8, 16, 8, 4, 2, 2],
+            [2, 4, 8, 16, 32, 16, 8, 4, 2],
+            [4, 8, 16, 32, 64, 32, 16, 8, 4],
+            [2, 4, 8, 16, 32, 16, 8, 4, 2],
+            [1, 2, 2, 4, 8, 4, 2, 2, 1],
+            [1, 1, 2, 2, 4, 2, 2, 1, 1],
+        ],
+    )
 
 
 def wf_9x9(img):
-    return weighted_filter(img, 9, [[1, 1, 1, 2, 2, 4, 2, 1, 1],
-                                    [1, 1, 2, 2, 4, 8, 4, 2, 1],
-                                    [1, 2, 2, 4, 8, 16, 8, 2, 1],
-                                    [2, 2, 4, 8, 16, 32, 16, 4, 2],
-                                    [2, 4, 8, 16, 32, 64, 32, 8, 4],
-                                    [4, 8, 16, 32, 64, 128, 64, 16, 8],
-                                    [2, 4, 8, 16, 32, 64, 32, 8, 4],
-                                    [1, 2, 2, 4, 8, 16, 8, 2, 1],
-                                    [1, 1, 2, 2, 4, 8, 4, 2, 1]])
+    return weighted_filter(
+        img,
+        9,
+        [
+            [1, 1, 1, 2, 2, 4, 2, 1, 1],
+            [1, 1, 2, 2, 4, 8, 4, 2, 1],
+            [1, 2, 2, 4, 8, 16, 8, 2, 1],
+            [2, 2, 4, 8, 16, 32, 16, 4, 2],
+            [2, 4, 8, 16, 32, 64, 32, 8, 4],
+            [4, 8, 16, 32, 64, 128, 64, 16, 8],
+            [2, 4, 8, 16, 32, 64, 32, 8, 4],
+            [1, 2, 2, 4, 8, 16, 8, 2, 1],
+            [1, 1, 2, 2, 4, 8, 4, 2, 1],
+        ],
+    )
 
 
 def wf_15x15(img):
-    return weighted_filter(img, 15, [[2, 2, 2, 2, 2, 2, 2],
-                                     [2, 3, 3, 3, 3, 3, 2],
-                                     [2, 3, 4, 4, 4, 3, 2],
-                                     [2, 3, 4, 5, 4, 3, 2],
-                                     [2, 3, 4, 4, 4, 3, 2],
-                                     [2, 3, 3, 3, 3, 3, 2],
-                                     [2, 2, 2, 2, 2, 2, 2]])
+    return weighted_filter(
+        img,
+        15,
+        [
+            [2, 2, 2, 2, 2, 2, 2],
+            [2, 3, 3, 3, 3, 3, 2],
+            [2, 3, 4, 4, 4, 3, 2],
+            [2, 3, 4, 5, 4, 3, 2],
+            [2, 3, 4, 4, 4, 3, 2],
+            [2, 3, 3, 3, 3, 3, 2],
+            [2, 2, 2, 2, 2, 2, 2],
+        ],
+    )
 
 
 def estimate_noise(img, region):
     # Define a region of interest in the image
     if region is not None:
         x, y, w, h = region
-        roi = img[y:y + h, x:x + w]
+        roi = img[y : y + h, x : x + w]
         mean, std = cv2.meanStdDev(roi)
         variance = std**2
         return (mean[0][0], variance[0][0])
@@ -134,7 +348,9 @@ def estimate_noise(img, region):
 
 
 def combo_gauss_sp(img, mean=1, var=50, p=0.05):
-    noisy_image, (noisy_image1, _), (noisy_image2, _) = combo_gauss_sp_noise(img, mean, var, p)
+    noisy_image, (noisy_image1, _), (noisy_image2, _) = combo_gauss_sp_noise(
+        img, mean, var, p
+    )
     return (noisy_image, noisy_image1, noisy_image2)
 
 
@@ -206,8 +422,9 @@ def draw_hist(img):
 
 def save_hist(img, name, excp=None):
     img = cv2.convertScaleAbs(img)
-    hist = cv2.calcHist([img], [0], None, [256],
-                        [0, 119, 121, 256] if excp is not None else [0, 256])
+    hist = cv2.calcHist(
+        [img], [0], None, [256], [0, 119, 121, 256] if excp is not None else [0, 256]
+    )
     plt.plot(hist)
     plt.xlabel("Gray level")
     plt.ylabel("Frequency")
@@ -367,7 +584,7 @@ def intensity_stretch(img, r1, s1, r2, s2):
 def dist(hist1, hist2):
     sum = 0
     for i in range(256):
-        sum += (hist1[i] - hist2[i])**2
+        sum += (hist1[i] - hist2[i]) ** 2
     return np.sqrt(sum)
 
 
@@ -645,78 +862,78 @@ def clahe(img, clipLimit, nrBins=128, nrX=0, nrY=0):
 
 
 # Broken
-def compare_color_hists(ivy):
-    # hsv_ivy = cv2.cvtColor(ivy, cv2.COLOR_BGR2HSV)
-    # rgb_hsv_ivy = cv2.cvtColor(hsv_ivy, cv2.COLOR_HSV2BGR)
+# def compare_color_hists(ivy):
+# hsv_ivy = cv2.cvtColor(ivy, cv2.COLOR_BGR2HSV)
+# rgb_hsv_ivy = cv2.cvtColor(hsv_ivy, cv2.COLOR_HSV2BGR)
 
-    # Compute the histograms
-    rgb_hist = cv2.calcHist(
-        [ivy], [0, 1, 2], None, [256, 256, 256], [0, 256, 0, 256, 0, 256]
-    )
-    # hsv_hist = cv2.calcHist(
-    #     [hsv_ivy], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256]
-    # )
-    # rgb_hsv_hist = cv2.calcHist(
-    #     [rgb_hsv_ivy], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256]
-    # )
+# Compute the histograms
+# rgb_hist = cv2.calcHist(
+# [ivy], [0, 1, 2], None, [256, 256, 256], [0, 256, 0, 256, 0, 256]
+# )
+# hsv_hist = cv2.calcHist(
+#     [hsv_ivy], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256]
+# )
+# rgb_hsv_hist = cv2.calcHist(
+#     [rgb_hsv_ivy], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256]
+# )
 
-    # Normalize the histograms
-    hist_norm_r = cv2.normalize(rgb_hist, rgb_hist, 0, 255, cv2.NORM_MINMAX)
-    # hist_norm_h = cv2.normalize(hsv_hist, hsv_hist, alpha=0, beta=1, normType=cv2.NORM_MINMAX)
-    # hist_norm_b =
-    # cv2.normalize(rgb_hsv_hist, rgb_hsv_hist, alpha=0, beta=1, normType=cv2.NORM_MINMAX)
+# Normalize the histograms
+# hist_norm_r = cv2.normalize(rgb_hist, rgb_hist, 0, 255, cv2.NORM_MINMAX)
+# hist_norm_h = cv2.normalize(hsv_hist, hsv_hist, alpha=0, beta=1, normType=cv2.NORM_MINMAX)
+# hist_norm_b =
+# cv2.normalize(rgb_hsv_hist, rgb_hsv_hist, alpha=0, beta=1, normType=cv2.NORM_MINMAX)
 
-    hist_flat_r = hist_norm_r.flatten()
-    # hist_flat_h = hist_norm_h.flatten()
-    # hist_flat_b = hist_norm_b.flatten()
+# hist_flat_r = hist_norm_r.flatten()
+# hist_flat_h = hist_norm_h.flatten()
+# hist_flat_b = hist_norm_b.flatten()
 
-    # Compute the colors for the histogram bins
-    colors = []
-    for r in range(256):
-        for g in range(256):
-            for b in range(256):
-                colors.append((r / 255, g / 255, b / 255))
+# Compute the colors for the histogram bins
+# colors = []
+# for r in range(256):
+# for g in range(256):
+# for b in range(256):
+# colors.append((r / 255, g / 255, b / 255))
 
-    return hist_flat_r
-    # Plot the histogram
-    # plt.bar(range(len(hist_flat_r)), hist_flat_r, color=colors)
+# return hist_flat_r
+# Plot the histogram
+# plt.bar(range(len(hist_flat_r)), hist_flat_r, color=colors)
 
+# Broken
+# def display_hist(img):
+## Extract 2-D arrays of the RGB channels: red, green, blue
+# red, green, blue = img[:, :, 0], img[:, :, 1], img[:, :, 2]
 
-def display_hist(img):
-    # Extract 2-D arrays of the RGB channels: red, green, blue
-    red, green, blue = img[:, :, 0], img[:, :, 1], img[:, :, 2]
+# red_pixels = red.flatten()
+# green_pixels = green.flatten()
+# blue_pixels = (
+# blue.flatten()
+# )  # Overlay histograms of the pixels of each color in the bottom subplot
+# fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(18, 6))
+# axes = axes.ravel()
 
-    red_pixels = red.flatten()
-    green_pixels = green.flatten()
-    blue_pixels = (
-        blue.flatten()
-    )  # Overlay histograms of the pixels of each color in the bottom subplot
-    fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(18, 6))
-    axes = axes.ravel()
+# for pix, color, ax in zip(
+# [red_pixels, green_pixels, blue_pixels], ["red", "green", "blue"], axes
+# ):
+# ax.hist(pix, bins=256, density=False, color=color, alpha=0.5)
 
-    for pix, color, ax in zip(
-        [red_pixels, green_pixels, blue_pixels], ["red", "green", "blue"], axes
-    ):
-        ax.hist(pix, bins=256, density=False, color=color, alpha=0.5)
+## set labels and ticks
+# ax.set_xticks(ticks=np.linspace(0, 255, 17))
+# ax.set_xticklabels(labels=range(0, 257, 16), rotation=90)
 
-        # set labels and ticks
-        ax.set_xticks(ticks=np.linspace(0, 255, 17))
-        ax.set_xticklabels(labels=range(0, 257, 16), rotation=90)
+## limit the y range if desired
+## ax.set_ylim(0, 10000)
 
-        # limit the y range if desired
-        # ax.set_ylim(0, 10000)
+## set the scale to log
+# ax.set_yscale("log")
 
-        # set the scale to log
-        ax.set_yscale("log")
+## Cosmetics
+# ax.set_title(f"Histogram from color {color}")
+# ax.set_ylabel("Counts")
+# ax.set_xlabel("Intensity")
 
-        # Cosmetics
-        ax.set_title(f"Histogram from color {color}")
-        ax.set_ylabel("Counts")
-        ax.set_xlabel("Intensity")
-
-    # Display the plot
-    plt.tight_layout()
-    plt.show()
+## Display the plot
+# plt.tight_layout()
+# plt.show()
 
 
 def display_hist_alt(img):
