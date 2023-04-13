@@ -1,11 +1,13 @@
-'''
+"""
 TODO: Clean up "##OLD"
-'''
+"""
 import matplotlib.pyplot as plt
 import cv2
+from cv2 import equalizeHist
 import numpy as np
-import scipy
+from multiprocess import pool
 
+from util import identity
 import algos as alg
 import write as wrt
 
@@ -17,49 +19,318 @@ gray_ivy = cv2.cvtColor(ivy, cv2.COLOR_BGR2GRAY)
 gray_ivy2 = cv2.cvtColor(ivy2, cv2.COLOR_BGR2GRAY)
 gray_oak_atln = cv2.cvtColor(oak_atln, cv2.COLOR_BGR2GRAY)
 gray_oak_east = cv2.cvtColor(oak_east, cv2.COLOR_BGR2GRAY)
-apple = cv2.imread("orig/apple.jpg")
+apple = cv2.imread("orig/apple.png")
 apple = cv2.cvtColor(apple, cv2.COLOR_BGR2GRAY)
 
+test_image_numbers = [
+    (str(x) if x >= 100 else ("0" + str(x) if x >= 10 else "00" + str(x))) + ".jpg"
+    for x in [y for y in range(30)]
+]
+
+
+def magic(gray):
+    # Apply a Gaussian filter to create a blurred version of the image
+    blurred = cv2.GaussianBlur(gray, (3, 3), 1)
+
+    # Subtract the blurred version of the image from the original image to create a mask
+    mask = cv2.subtract(gray, blurred)
+
+    # Multiply the mask by a factor (0.5 in this example) and add it back to the original image
+    sharpened = cv2.addWeighted(gray, 1.5, mask, 0.5, 0)
+    return blurred, sharpened
+
+
+def enhance(img):
+    return alg.lut_stretch(img)
+
+
+def segment(img):
+    return alg.otsu(img)
+
+
+def combine_enh_seg(img):
+    return enhance(img) * segment(img)
+
+def combine_g(img, f, g):
+    return f(img) * g(img)
+
+def gen_hist(img, feats=False):
+    hist = cv2.calcHist([img], [0], None, [255], [0, 256], accumulate=False)
+    cv2.normalize(hist, hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)  # type: ignore
+    if feats:
+        hist = np.append(hist, [np.median(hist), np.mean(hist), np.amax(hist), np.amin(hist)])  # type: ignore
+    return hist
+
+
+def chi_compare(img1, img2, feats=False):
+    return cv2.compareHist(gen_hist(img1, feats), gen_hist(img2, feats), 1)
+
+
+def loop(iimg, feats=False, f=combine_enh_seg):
+    successes = []
+    for lst, name in [
+        (test_image_numbers, p)
+        for p in [
+            "poison_ivy",
+            "poison_ivy_west",
+            "poison_oak_west",
+            "poison_oak_east",
+            "poison_sumac",
+            "bear_oak",
+            "boxelder",
+            "fragrant_sumac",
+            "jack_in_the_pulpit",
+            "virginia_creeper",
+        ]
+    ]:
+        if name.__contains__("poison"):  # type: ignore
+            for x in lst:
+                img = cv2.cvtColor(
+                    cv2.imread(f"toxic_images/{name}/{x}"), cv2.COLOR_BGR2GRAY
+                )
+                compare = (chi_compare(f(img), f(iimg), feats), name, x)
+                if compare[0] > 0.0:
+                    successes.append(compare)
+        else:
+            for x in lst:
+                img = cv2.cvtColor(
+                    cv2.imread(f"nontoxic_images/{name}/{x}"), cv2.COLOR_BGR2GRAY
+                )
+                compare = (chi_compare(f(img), f(iimg), feats), name, x)
+                if compare[0] > 0.0:
+                    successes.append(compare)
+    successes.sort()
+    return successes
+
+
+collect = []
+
+
+def loop_over(ilstname, f=combine_enh_seg):
+    lst = []
+    if ilstname[1].__contains__("poison"):
+        for x in ilstname[0]:
+            img = cv2.cvtColor(
+                cv2.imread(f"toxic_images/{ilstname[1]}/{x}"), cv2.COLOR_BGR2GRAY
+            )
+            s = loop(img, False, f)
+            # print(f"{name}, {x}: ", s[:1])
+            lst.append((f"{ilstname[1]}", s[:1]))
+    else:
+        for x in ilstname[0]:
+            img = cv2.cvtColor(
+                cv2.imread(f"nontoxic_images/{ilstname[1]}/{x}"), cv2.COLOR_BGR2GRAY
+            )
+            s = loop(img, False, f)  # f"{ilstname[2]}, {x}")
+            # print(f"{name}, {x}: ", s[:1])
+            lst.append((f"{ilstname[1]}", s[:1]))
+    return lst
+
+
+def thread_party(f=enhance, g=segment):
+    with pool.Pool(12) as p:
+        collect.append(
+            p.map(
+                lambda x: loop_over(x, lambda img: combine_g(img, f, g)),
+                [
+                    (test_image_numbers, p)
+                    for p in [
+                        "poison_ivy",
+                        "poison_ivy_west",
+                        "poison_oak_east",
+                        "poison_oak_west",
+                        "poison_sumac",
+                        "bear_oak",
+                        "boxelder",
+                        "fragrant_sumac",
+                        "jack_in_the_pulpit",
+                        "virginia_creeper",
+                    ]
+                ],
+            )
+        )
+        return collect
+
+
+def dflatten(l):
+    return [
+        item
+        for sublist in [item for sublist in l for item in sublist]
+        for item in sublist
+    ]
+
+
+def count_successes_fails(collect):
+    return (
+        sum([1 if c[0] == c[1][0][1] else 0 for c in dflatten(collect)]),
+        sum(
+            [
+                1
+                if c[0].__contains__("poison") and c[1][0][1].__contains__("poison")
+                else 0
+                for c in dflatten(collect)
+            ]
+        ),
+        sum(
+            [
+                1
+                if (not c[0].__contains__("poison")) and (not c[1][0][1].__contains__("poison"))
+                else 0
+                for c in dflatten(collect)
+            ]
+        ),
+        sum(
+            [
+                1
+                if c[0].__contains__("poison") and (not c[1][0][1].__contains__("poison"))
+                else 0
+                for c in dflatten(collect)
+            ]
+        ),
+        sum(
+            [
+                1
+                if (not c[0].__contains__("poison")) and c[1][0][1].__contains__("poison")
+                else 0
+                for c in dflatten(collect)
+            ]
+        ),
+    )
+    # return collect
+
+if __name__ == '__main__':
+    collect = thread_party(lambda img: equalizeHist(enhance(img)), lambda img: alg.global_thresh(img, 130))
+    print(count_successes_fails(collect))
+print([x/300 for x in count_successes_fails(collect)])
+
+# if __name__ == '__main__':
+# collect = thread_party()
+# print(count_sucesses(collect))
+
+# [print("TRUE: ", c) if c[0] == c[1][0][1] else print("FALSE:", c) for c in collect]
+# print("avg", np.mean(np.array([s[0] for s in successes])))
+# print("median", np.median(np.array([s[0] for s in successes])))
+
+# cv2.imwrite("ivy-f.png", magic(ivy2)[0])
+# cv2.imwrite("ivy-s.png", magic(ivy2)[1])
+# f = combine_enh_seg
+# wrt.multi_save(
+# "midterm",
+# [
+# ("apple", apple),
+# ("ivy2", gray_ivy2),
+# ("oak_east", gray_oak_east),
+# ("oak_atln", gray_oak_atln),
+# ("ivy", gray_ivy),
+# ],
+# [
+## ("enhance", enhance),
+## ("segment", segment),
+## ("combine", combine_enh_seg),
+# (
+# "compare-oak-atln_",
+# lambda img: print(chi_compare(gray_ivy2, f(img), True)),
+# )
+# ],
+# )
+# for (name, img) in [("ivy2", gray_ivy2), ("oak_east", gray_oak_east), ("oak_atln", gray_oak_atln), ("ivy", gray_ivy)]:
+# alg.save_hist(combine_enh_seg(img), f"{name}/midterm")
+# wrt.test(
+# gray_ivy,
+# [
+# enhance,
+# segment,
+# combine_enh_seg,
+# ],
+# )
 
 ## OLD
+# cv2.imwrite("morph/ivy/sc-k7-cross.png", closing(gray_ivy, 7))
+# cv2.imwrite("morph/ivy/soc-k7-cross.png", opening(closing(gray_ivy, 7), 7))
+# cv2.imwrite("morph/ivy/sooc-k7-cross.png", opening(opening(closing(gray_ivy, 7), 7), 7))
+# cv2.imwrite("morph/ivy/scooc-k7-cross.png", closing(opening(opening(closing(gray_ivy, 7), 7), 7), 7))
+# cv2.imwrite("morph/ivy/sccooc-k7-cross.png", closing(closing(opening(opening(closing(gray_ivy, 7), 7), 7), 7), 7))
+# cv2.imwrite("morph/ivy/soccooc-k7-cross.png", opening(closing(closing(opening(opening(closing(gray_ivy, 7), 7), 7), 7), 7), 7))
+# cv2.imwrite("morph/ivy/scoccooc-k7-cross.png", closing(opening(closing(closing(opening(opening(closing(gray_ivy, 7), 7), 7), 7), 7), 7), 7))
+
+# for e in ["cross", "square", "xshape", "circ"]:
+# wrt.multi_save(
+# "morph",
+# [("ivy2", gray_ivy2), ("oak_atln", gray_oak_atln), ("ivy", gray_ivy)],
+# [
+# ("dilation", dilate),
+# ("erosion", erode),
+# ("opening", opening),
+# ("closing", closing),
+# ("gradient", morph_grad),
+# ("top_hat", top_hat),
+# ("bot_hat", lambda img, *args: (bot_hat(img, *args)) * 255),
+# ],
+# [(3, "k3"), (e, e)],
+##("global-128", lambda img: alg.global_thresh(img, 128)),
+# )
+# wrt.multi_save(
+# "morph",
+# [("ivy2", gray_ivy2), ("oak_atln", gray_oak_atln)],
+# [
+# ("dilation", dilate),
+# ("erosion", erode),
+# ("opening", opening),
+# ("closing", closing),
+# ("gradient", morph_grad),
+# ("top_hat", top_hat),
+# ("bot_hat", lambda img, *args: (bot_hat(img, *args)) * 255),
+# ],
+# [(7, "k7"), (e, e)],
+##("global-128", lambda img: alg.global_thresh(img, 128)),
+# )
+
+# cv2.imwrite("t128_ivy.png", alg.global_thresh(gray_ivy, 128))
+# wrt.test(
+# gray_ivy2,
+# [identity, erode, dilate, opening, closing, morph_grad, bot_hat, top_hat],
+# 2,
+# 3,
+# "cross",
+# )
 # cv2.imwrite("enhance/gaussfilt3-s2_oak_atln.png", cv2.GaussianBlur(gray_oak_atln, (3,3), sigmaX=2))
 # alg.save_hist(cv2.GaussianBlur(gray_oak_atln, (3,3), sigmaX=2), "gaussfilt3-s2_oak_atln.png")
 
-#write_hist_hog(gray_oak_atln, "oak_atln", [2.0, 3.0, 5.0], [5, 15, 2])
-#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 20)
-#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 40)
-#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 128)
-#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 60)
-#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 80)
-#write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 100)
-#write_hist_robinson(gray_oak_atln, "oak_atln", 30)
-#write_hist_robinson(gray_oak_atln, "oak_atln", 50)
-#write_hist_robinson(gray_oak_atln, "oak_atln", 100)
-#write_hist_robinson(gray_oak_atln, "oak_atln", 150)
+# write_hist_hog(gray_oak_atln, "oak_atln", [2.0, 3.0, 5.0], [5, 15, 2])
+# write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 20)
+# write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 40)
+# write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 128)
+# write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 60)
+# write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 80)
+# write_combo_gauss_sobel(gray_oak_atln, "oak_atln", 3, 2, 100)
+# write_hist_robinson(gray_oak_atln, "oak_atln", 30)
+# write_hist_robinson(gray_oak_atln, "oak_atln", 50)
+# write_hist_robinson(gray_oak_atln, "oak_atln", 100)
+# write_hist_robinson(gray_oak_atln, "oak_atln", 150)
 
-#write_hist_hog(gray_ivy, "ivy", [2.0, 3.0, 5.0], [5, 15, 2])
-#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 20)
-#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 40)
-#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 128)
-#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 60)
-#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 80)
-#write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 100)
-#write_hist_robinson(gray_ivy, "ivy", 30)
-#write_hist_robinson(gray_ivy, "ivy", 50)
-#write_hist_robinson(gray_ivy, "ivy", 100)
-#write_hist_robinson(gray_ivy, "ivy", 150)
+# write_hist_hog(gray_ivy, "ivy", [2.0, 3.0, 5.0], [5, 15, 2])
+# write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 20)
+# write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 40)
+# write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 128)
+# write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 60)
+# write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 80)
+# write_combo_gauss_sobel(gray_ivy, "ivy", 3, 2, 100)
+# write_hist_robinson(gray_ivy, "ivy", 30)
+# write_hist_robinson(gray_ivy, "ivy", 50)
+# write_hist_robinson(gray_ivy, "ivy", 100)
+# write_hist_robinson(gray_ivy, "ivy", 150)
 
-#write_hist_hog(gray_ivy2, "ivy2", [2.0, 3.0, 5.0], [5, 15, 2])
-#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 20)
-#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 40)
-#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 128)
-#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 60)
-#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 80)
-#write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 100)
-#write_hist_robinson(gray_ivy2, "ivy2", 30)
-#write_hist_robinson(gray_ivy2, "ivy2", 50)
-#write_hist_robinson(gray_ivy2, "ivy2", 100)
-#write_hist_robinson(gray_ivy2, "ivy2", 150)
+# write_hist_hog(gray_ivy2, "ivy2", [2.0, 3.0, 5.0], [5, 15, 2])
+# write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 20)
+# write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 40)
+# write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 128)
+# write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 60)
+# write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 80)
+# write_combo_gauss_sobel(gray_ivy2, "ivy2", 3, 2, 100)
+# write_hist_robinson(gray_ivy2, "ivy2", 30)
+# write_hist_robinson(gray_ivy2, "ivy2", 50)
+# write_hist_robinson(gray_ivy2, "ivy2", 100)
+# write_hist_robinson(gray_ivy2, "ivy2", 150)
 
 # write_hist_canny(oak_atln, "oak_atln", 20, 120)
 # write_hist_canny(oak_atln, "oak_atln", 20, 200)

@@ -1,13 +1,58 @@
 """
 TODO: Reference functions that were borrowed
-     Clean up the functions
+      Clean up the functions
 """
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import skimage as si
-from skimage import filters
 
+def make_form(k, form):
+    match form:
+        case "square":
+            return cv2.getStructuringElement(cv2.MORPH_RECT, (k, k))
+        case "cross":
+            return cv2.getStructuringElement(cv2.MORPH_CROSS, (k, k))
+        case "xshape":
+            return np.array(
+                [[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=np.uint8
+            )  # non-k for now
+        case "circ":
+            return np.array(
+                [[1, 1, 1], 
+                 [1, 0, 1], 
+                 [1, 1, 1]], dtype=np.uint8
+            )  # non-k for now
+
+
+def erode(img, k=3, form="cross"):
+    return cv2.erode(img, make_form(k, form))
+
+
+def dilate(img, k=3, form="cross"):
+    return cv2.dilate(img, make_form(k, form))
+
+
+def opening(img, k=3, form="cross"):
+    return dilate(erode(img, k, form), k, form)
+
+
+def closing(img, k=3, form="cross"):
+    return erode(dilate(img, k, form), k, form)
+
+
+def morph_grad(img, k1=3, form1="cross", k2=None, form2=None):
+    return dilate(img, k1, form1) - erode(
+        img, k1 if k2 is None else k2, form1 if form2 is None else form2
+    )
+
+
+def top_hat(img, k=3, form="cross"):
+    return (img - opening(img, k, form).astype(np.uint8)).astype(np.uint8)
+
+
+def bot_hat(img, k=3, form="cross"):
+    return (img - closing(img, k, form).astype(np.uint8)).astype(np.uint8)
 
 def any_neighbor_zero(img, i, j):
     for k in range(-1, 2):

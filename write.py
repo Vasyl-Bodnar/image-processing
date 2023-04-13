@@ -1,16 +1,54 @@
-'''
+"""
 TODO: Organize and Abstract
-'''
+"""
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 import algos as alg
+from util import identity
 
 
-def multi_show(imgs, n):
-    _, axis = plt.subplots(n, 1)
-    for i in range(n):
-        axis[i].imshow(imgs[i], cmap="gray")
+def test(img, fs, l=1, *args):
+    multi_show([f(img, *args) for f in fs], l)
+    plt.show()
+
+
+def multi_show(imgs, l=1, n=None):
+    n = len(imgs) if n is None else n
+    _, axis = plt.subplots(l, n // l)
+    if n > 1:
+        i = 0
+        for row in axis:
+            if l > 1:
+                for col in row:
+                    col.imshow(imgs[i], cmap="gray")
+                    i += 1
+            else:
+                row.imshow(imgs[i], cmap="gray")  # type:ignore
+                i += 1
+    else:
+        axis.imshow(imgs[0], cmap="gray")  # type:ignore
+
+
+# Rather complex base function for saving things
+def multi_save(loc, name_imgs, name_fs, name_args=[], preprocess=("", identity)):
+    arg = []
+    fdata = ""
+    preprocess = (".", preprocess[1]) if preprocess[0] == "" else preprocess
+    if len(name_args) != 0:
+        for k, n in name_args:
+            arg.append(k)
+            fdata += "-" + n
+    for iname, i in name_imgs:
+        for fname, f in name_fs:
+            if fname.endswith("_"):
+                print(fname[:-1] + f" for {iname}:")
+                f(preprocess[1](i), *arg)
+            else:
+                cv2.imwrite(
+                    f"{loc}/{iname}/{preprocess[0]}/{fname}{fdata}.png",
+                    f(preprocess[1](i), *arg),
+                )
 
 
 def show_sob(img, T):
