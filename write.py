@@ -1,5 +1,6 @@
 """
-TODO: Organize and Abstract
+Defines many functions and abstractions to help show or save more images more easily
+Most are conjured rather horribly
 """
 import matplotlib.pyplot as plt
 import cv2
@@ -554,64 +555,3 @@ def arithm_kern(img, name, kerns, m, v, p):
             alg.arithm_filter(full, k),
             "filt-{}_full{}-{}-{}_{}.png".format(k, m, v, p, name),
         )
-
-
-# def geom_kern(img, name, kerns, m, v, p):
-#     sp, gauss, full = combo_get(name)
-#     for k in kerns:
-#         cv2.imwrite(
-#             "enhance/filtg-{}_{}.png".format(k, name), alg.geometric_filter(img, k)
-#         )
-#         cv2.imwrite(
-#             "enhance/filtg-{}_{}_sp.png".format(k, name), alg.geometric_filter(sp, k)
-#         )
-#         cv2.imwrite(
-#             "enhance/filtg-{}_{}_gauss.png".format(k, name),
-#             alg.geometric_filter(gauss, k),
-#         )
-#         cv2.imwrite(
-#             "enhance/filtg-{}_{}_full.png".format(k, name),
-#             alg.geometric_filter(full, k),
-#         )
-#         alg.save_hist(
-#             alg.geometric_filter(img, k),
-#             "filtg-{}_{}.png".format(k, name),
-#         )
-#         alg.save_hist(
-#             alg.geometric_filter(gauss, k),
-#             "filtg-{}_gauss{}-{}_{}.png".format(k, m, v, name),
-#         )
-#         alg.save_hist(
-#             alg.geometric_filter(sp, k), "filtg-{}_s&p{}_{}.png".format(k, p, name)
-#         )
-#         alg.save_hist(
-#             alg.geometric_filter(full, k),
-#             "filtg-{}_full{}-{}-{}_{}.png".format(k, m, v, p, name),
-#         )
-
-
-# def weight_kern(img, name, kerns, m, v, p):
-#     sp, gauss, full = combo_get(name)
-#     kerns = zip([alg.wf_3x3, alg.wf_7x7, alg.wf_9x9], kerns)
-#     for f, k in kerns:
-#         cv2.imwrite("enhance/wfilt-{}_{}.png".format(k, name), f(img))
-#         cv2.imwrite("enhance/wfilt-{}_{}_sp.png".format(k, name), f(sp))
-#         cv2.imwrite("enhance/wfilt-{}_{}_gauss.png".format(k, name), f(gauss))
-#         cv2.imwrite("enhance/wfilt-{}_{}_full.png".format(k, name), f(full))
-#         alg.save_hist(
-#             f(img),
-#             "wfilt-{}_{}.png".format(k, name),
-#         )
-#         alg.save_hist(
-#             f(gauss),
-#             "wfilt-{}_gauss{}-{}_{}.png".format(k, m, v, name),
-#         )
-#         alg.save_hist(f(sp), "wfilt-{}_s&p{}_{}.png".format(k, p, name))
-#         alg.save_hist(
-#             f(full),
-#             "wfilt-{}_full{}-{}-{}_{}.png".format(k, m, v, p, name),
-#         )
-
-
-# # weight_kern(gray_ivy2, "ivy2", [3, 7, 9], 1, 50, 0.05)
-# # geom_kern(gray_ivy2, "ivy2", [3, 7, 9, 15], 1, 50, 0.05)

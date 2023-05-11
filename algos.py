@@ -1,11 +1,184 @@
 """
-TODO: Reference functions that were borrowed
-      Clean up the functions
+General algorithms that I used throughout the semester
+Many are somewhat outdated in their design considiring my experience with them, were made slopily, and may not even work
+Requires 3.10 python as I use a couple of match statements
 """
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import skimage as si
+from scipy.stats import skew, kurtosis, entropy
+from multiprocess import pool
+
+def get_img(path):
+    return cv2.imread(path, 1)
+
+def get_gray_img(path):
+    return cv2.imread(path, 0)
+
+def gauss_kernel(ksize, s):
+    return np.outer(cv2.getGaussianKernel(ksize, s), cv2.getGaussianKernel(ksize, s))
+
+def gauss_filter(img, ksize, s):
+    return cv2.filter2D(img, -1, gauss_kernel(ksize, s))
+
+def switch_rgb(img):
+    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+def to_gray(img):
+    return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+def calculate_lbp_feature(img, kernel_size=3, n_points=8):
+    lbp = np.zeros_like(img)
+    center_points = [
+        (i, j)
+        for i in range(kernel_size, img.shape[0] - kernel_size)
+        for j in range(kernel_size, img.shape[1] - kernel_size)
+    ]
+
+    def calculate_lbp(center):
+        i, j = center
+        center_value = img[i, j]
+        code = 0
+        for k in range(n_points):
+            x = i + int((kernel_size - 1) * np.cos(2 * np.pi * k / n_points))
+            y = j - int((kernel_size - 1) * np.sin(2 * np.pi * k / n_points))
+            if img[x, y] > center_value:
+                code += 2**k
+        return code
+
+    with pool.Pool(12) as p:
+        codes = p.map(calculate_lbp, center_points)
+
+    for i, center in enumerate(center_points):
+        lbp[center[0], center[1]] = codes[i]
+
+    hist, _ = np.histogram(lbp.ravel(), bins=np.arange(2**n_points + 1))
+    hist = hist.astype("float")
+    hist /= hist.sum() + 1e-7
+    feature_vector = hist.flatten()
+    return feature_vector
+
+
+def intensity_feats(hist):
+    mean = np.mean(hist)
+    median = np.median(hist)
+    var = np.var(hist)
+    smoothness = np.sum(np.abs(np.diff(hist, n=2)))
+    skewness = skew(hist)
+    kurt = kurtosis(hist)
+    ent = entropy(hist)
+    return [mean, median, var, smoothness, skewness[0], kurt[0], ent[0]]  # type:ignore
+
+
+def area_feat(img):
+    contours = sorted(find_contours(img), key=cv2.contourArea, reverse=True)
+    largest_contour = contours[0]
+    return (
+        cv2.contourArea(largest_contour),
+        cv2.drawContours(
+            np.zeros_like(img) + 255, [largest_contour], -1, (0, 255, 0), 2
+        ),
+        cv2.arcLength(largest_contour, True),
+    )
+
+
+def generate_chain_code(img):
+    largest_contour = max(find_contours(img), key=cv2.contourArea)
+    chain = []
+    prev_point = largest_contour[0][0]
+    for point in largest_contour[1:]:
+        point = point[0]
+        diff = point - prev_point
+        match diff[0], diff[1]:
+            case 1, 0:
+                chain.append(0)
+            case 1, -1:
+                chain.append(1)
+            case 0, -1:
+                chain.append(2)
+            case -1, -1:
+                chain.append(3)
+            case -1, 0:
+                chain.append(4)
+            case -1, 1:
+                chain.append(5)
+            case 0, 1:
+                chain.append(6)
+            case 1, 1:
+                chain.append(7)
+        prev_point = point
+    return chain
+
+
+def find_contours(img):
+    edges = enh_seg(img)
+    contours, _ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    return contours
+
+
+def enhance(img):
+    return lut_stretch(img)
+
+
+def segment(img):
+    return otsu(img)
+
+
+def enh_seg(img):
+    return enhance(img) * segment(img)
+
+
+def box_counting_dim_single(
+    img, grid_sizes=[2, 4, 8, 16, 32, 64, 128, 256], apply=enh_seg
+):
+    height = 600 # This constant should not exist
+    img_resized = cv2.resize(img, (int(height * img.shape[1] / img.shape[0]), height))
+    img_bw = apply(img_resized)
+    counts = []
+    for size in grid_sizes:
+        count = 0
+        for i in range(0, img_bw.shape[0] - size, size):
+            for j in range(0, img_bw.shape[1] - size, size):
+                if np.sum(img_bw[i : i + size, j : j + size]) > 0:
+                    count += 1
+        counts.append(count)
+    log_sizes = np.log(grid_sizes)
+    log_counts = np.log(np.array(counts) + 1)
+    return (log_counts[-1] - log_counts[0]) / (log_sizes[-1] - log_sizes[0])
+
+
+def box_counting_dim(
+    ref_img, test_imgs, grid_sizes=[2, 4, 8, 16, 32, 64, 128, 256], apply=enh_seg
+):
+    test_imgs.append(ref_img)
+    height = 600 # This constant should not exist
+    counts_list = []
+    for img in test_imgs:
+        img_resized = cv2.resize(
+            img, (int(height * img.shape[1] / img.shape[0]), height)
+        )
+        img_bw = apply(img_resized)
+        counts = []
+        for size in grid_sizes:
+            count = 0
+            for i in range(0, img_bw.shape[0] - size, size):
+                for j in range(0, img_bw.shape[1] - size, size):
+                    if np.sum(img_bw[i : i + size, j : j + size]) > 0:
+                        count += 1
+            counts.append(count)
+        counts_list.append(counts)
+    log_sizes = np.log(grid_sizes)
+    log_counts_ref = np.log(counts_list[-1])
+    slope_list = []
+    for counts in counts_list[:-1]:
+        log_counts = np.log(np.array(counts) + 1e-20)
+        slope = (log_counts[-1] - log_counts[0]) / (log_sizes[-1] - log_sizes[0]) - (
+            log_counts_ref[-1] - log_counts_ref[0]
+        ) / (log_sizes[-1] - log_sizes[0])
+        slope_list.append(slope)
+    return slope_list
+
 
 def make_form(k, form):
     match form:
@@ -14,15 +187,9 @@ def make_form(k, form):
         case "cross":
             return cv2.getStructuringElement(cv2.MORPH_CROSS, (k, k))
         case "xshape":
-            return np.array(
-                [[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=np.uint8
-            )  # non-k for now
+            return np.array([[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=np.uint8)  # non-k
         case "circ":
-            return np.array(
-                [[1, 1, 1], 
-                 [1, 0, 1], 
-                 [1, 1, 1]], dtype=np.uint8
-            )  # non-k for now
+            return np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], dtype=np.uint8)  # non-k
 
 
 def erode(img, k=3, form="cross"):
@@ -54,9 +221,10 @@ def top_hat(img, k=3, form="cross"):
 def bot_hat(img, k=3, form="cross"):
     return (img - closing(img, k, form).astype(np.uint8)).astype(np.uint8)
 
+
 def any_neighbor_zero(img, i, j):
     for k in range(-1, 2):
-        for l in range(-1, 2):
+        for _ in range(-1, 2):
             if img[i + k, j + k] == 0:
                 return True
     return False
@@ -190,8 +358,9 @@ def otsu(img):
 
 
 def global_thresh(img, T):
-    # Could also just been zeroes[img >= T] = 255
-    return (cv2.threshold(img, T, 255, cv2.THRESH_BINARY))[1]
+    fin = np.zeros(img)
+    fin[img >= T] = 255
+    return fin
 
 
 def niblack(img, window_size=30, k=-0.3):
@@ -311,17 +480,12 @@ def arithm_filter(img, kernel_size):
 
 def weighted_filter(img, kernel_size=3, weights=[[1, 2, 1], [2, 4, 2], [1, 2, 1]]):
     weights = np.array(weights).flatten()
-    # Create the kernel
     kernel = np.zeros((kernel_size, kernel_size))
     for i in range(kernel_size):
         for j in range(kernel_size):
             kernel[i, j] = weights[i * kernel_size + j]
     kernel = kernel / np.sum(kernel)
     return cv2.filter2D(img, -1, kernel)
-
-    # weights = np.array([[1, 2, 1], [2, 4, 2], [1, 2, 1]], dtype=np.float32)
-    # weights = weights / np.sum(weights)
-    # return cv2.filter2D(img, -1, weights)
 
 
 def wf_3x3(img):
@@ -380,7 +544,6 @@ def wf_15x15(img):
 
 
 def estimate_noise(img, region):
-    # Define a region of interest in the image
     if region is not None:
         x, y, w, h = region
         roi = img[y : y + h, x : x + w]
@@ -392,13 +555,7 @@ def estimate_noise(img, region):
     return (mean[0][0], variance[0][0])
 
 
-def combo_gauss_sp(img, mean=1, var=50, p=0.05):
-    noisy_image, (noisy_image1, _), (noisy_image2, _) = combo_gauss_sp_noise(
-        img, mean, var, p
-    )
-    return (noisy_image, noisy_image1, noisy_image2)
-
-
+# Combine Gauss and Salt and Pepper noise
 def combo_gauss_sp_noise(img, mean=1, var=50, p=0.05):
     height, width = img.shape[:2]
     mask = np.random.choice([0, 1, 2], size=(height, width), p=[1 - p - p, p, p])
@@ -420,6 +577,14 @@ def combo_gauss_sp_noise(img, mean=1, var=50, p=0.05):
     return (noisy_image, (noisy_image1, noise), (noisy_image2, gaussian))
 
 
+# Combine Gauss and Salt and Pepper noises, do not return noises
+def combo_gauss_sp(img, mean=1, var=50, p=0.05):
+    noisy_image, (noisy_image1, _), (noisy_image2, _) = combo_gauss_sp_noise(
+        img, mean, var, p
+    )
+    return noisy_image, noisy_image1, noisy_image2
+
+
 def gaussian_noise(img, mean=1, var=50):
     gaussian = np.random.normal(mean, var, img.shape)
     noisy_image = img + gaussian
@@ -427,6 +592,7 @@ def gaussian_noise(img, mean=1, var=50):
     return cv2.convertScaleAbs(noisy_image)
 
 
+# Add salt and pepper noise
 def s_and_p_noise(image, pa=0.05, pb=0.05):
     height, width = image.shape[:2]
     mask = np.random.choice([0, 1, 2], size=(height, width), p=[1 - pa - pb, pa, pb])
@@ -446,14 +612,13 @@ def salt_noise(img, prob=0.05):
     return cv2.convertScaleAbs(noisy_image)
 
 
+# Gray from constants
 def gray(img, r, g, b):
+    B, G, R = cv2.split(img)
     gray = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
     for i in range(img.shape[0]):
         for j in range(img.shape[1]):
-            R = img[i, j, 2]
-            G = img[i, j, 1]
-            B = img[i, j, 0]
-            gray[i, j] = r * R + g * G + b * B
+            gray[i, j] = r * R[i, j] + g * G[i, j] + b * B[i, j]
     return gray
 
 
@@ -465,6 +630,7 @@ def draw_hist(img):
     plt.show()
 
 
+# Frequently used histogram saving function
 def save_hist(img, name, excp=None):
     img = cv2.convertScaleAbs(img)
     hist = cv2.calcHist(
@@ -477,6 +643,7 @@ def save_hist(img, name, excp=None):
     plt.close()
 
 
+# Apply rgb_to_hsv on image
 def rgb_img_to_hsv(img):
     hsv = np.zeros_like(img)
     for i in range(img.shape[0]):
@@ -486,12 +653,9 @@ def rgb_img_to_hsv(img):
 
 
 def rgb_to_hsv(rgb):
-    # Normalize the RGB values to a range of 0-1.0
     r, g, b = rgb / 255.0
-    # Compute the maximum and minimum values of the RGB channels
     max_val = np.max([r, g, b])
     min_val = np.min([r, g, b])
-    # Compute the hue value
     if max_val == min_val:
         h = 0.0
     elif max_val == r:
@@ -503,34 +667,12 @@ def rgb_to_hsv(rgb):
     h = h * 60.0
     if h < 0:
         h += 360
-    # Compute the saturation value
     if max_val == 0.0:
         s = 0.0
     else:
         s = (max_val - min_val) / max_val
-    # Compute the value
     v = max_val
     return np.array([h / 2, s, v])
-
-
-# def rgb_to_hsv(r, g, b):
-#     maxc = max(r, g, b)
-#     minc = min(r, g, b)
-#     v = maxc
-#     if minc == maxc:
-#         return 0.0, 0.0, v
-#     s = (maxc - minc) / maxc
-#     rc = (maxc - r) / (maxc - minc)
-#     gc = (maxc - g) / (maxc - minc)
-#     bc = (maxc - b) / (maxc - minc)
-#     if r == maxc:
-#         h = bc - gc
-#     elif g == maxc:
-#         h = 2.0 + rc - bc
-#     else:
-#         h = 4.0 + gc - rc
-#     h = (h / 6.0) % 1.0
-#     return (h, s, v)
 
 
 def hsv_to_rgb(h, s, v):
@@ -542,20 +684,22 @@ def hsv_to_rgb(h, s, v):
     q = v * (1.0 - s * f)
     t = v * (1.0 - s * (1.0 - f))
     i = i % 6
-    if i == 0:
-        return v, t, p
-    if i == 1:
-        return q, v, p
-    if i == 2:
-        return p, v, t
-    if i == 3:
-        return p, q, v
-    if i == 4:
-        return t, p, v
-    if i == 5:
-        return v, p, q
+    match i:
+        case 0:
+            return v, t, p
+        case 1:
+            return q, v, p
+        case 2:
+            return p, v, t
+        case 3:
+            return p, q, v
+        case 4:
+            return t, p, v
+        case 5:
+            return v, p, q
 
 
+# Broken minmax stretching
 def mm_stretch(img):
     minmax_img = np.zeros((img.shape[0], img.shape[1]), dtype="uint8")
     min = np.min(img)
@@ -566,6 +710,7 @@ def mm_stretch(img):
     return minmax_img
 
 
+# LUT contrast stretching
 def lut_stretch(img):
     xp = [0, 64, 128, 192, 255]
     fp = [0, 16, 128, 240, 255]
@@ -574,15 +719,15 @@ def lut_stretch(img):
     return cv2.LUT(img, table)
 
 
+# LUT gamma correction
 def gamma_correct(img, gamma):
     invGamma = 1 / gamma
-
     table = [((i / 255) ** invGamma) * 255 for i in range(256)]
     table = np.array(table, np.uint8)
-
     return cv2.LUT(img, table)
 
 
+# Basic histogram making
 def make_hist(img):
     histogram = np.zeros(256)
 
@@ -604,6 +749,7 @@ def normalize(cs):
     return (255 * (cs - cs.min())) / (cs.max() - cs.min())
 
 
+# Basic histogram equalization
 def hist_equal(img):
     flat_img = img.flatten()
     equal_img = normalize(cumm_sum(make_hist(flat_img))).astype("uint8")[flat_img]
@@ -619,10 +765,6 @@ def intensity_stretch(img, r1, s1, r2, s2):
         else:
             return ((255 - s2) / (255 - r2)) * (pix - r2) + s2
 
-    # x = np.arange(255).astype("uint8")
-    # y = np.vectorize(pix_manpl)(x)
-    # plt.plot(x, y)
-    # plt.show()
     return np.vectorize(pix_manpl)(img)
 
 
@@ -633,6 +775,7 @@ def dist(hist1, hist2):
     return np.sqrt(sum)
 
 
+# TODO: All Retinex code needs to be credited
 def singleScaleRetinex(img, variance):
     retinex = np.log10(img) - np.log10(cv2.GaussianBlur(img, (0, 0), variance))
     return retinex
@@ -735,6 +878,7 @@ def interpolate(subBin, LU, RU, LB, RB, subX, subY):
 
 
 # FIX: Divide into sep fns
+# TODO: Credit
 def clahe(img, clipLimit, nrBins=128, nrX=0, nrY=0):
     """
     CLAHE algorithm implementation
@@ -904,81 +1048,6 @@ def clahe(img, clipLimit, nrBins=128, nrX=0, nrY=0):
         return claheimg[:-excX, :-excY]
     else:
         return claheimg
-
-
-# Broken
-# def compare_color_hists(ivy):
-# hsv_ivy = cv2.cvtColor(ivy, cv2.COLOR_BGR2HSV)
-# rgb_hsv_ivy = cv2.cvtColor(hsv_ivy, cv2.COLOR_HSV2BGR)
-
-# Compute the histograms
-# rgb_hist = cv2.calcHist(
-# [ivy], [0, 1, 2], None, [256, 256, 256], [0, 256, 0, 256, 0, 256]
-# )
-# hsv_hist = cv2.calcHist(
-#     [hsv_ivy], [0, 1, 2], None, [8, 8, 8], [0, 180, 0, 256, 0, 256]
-# )
-# rgb_hsv_hist = cv2.calcHist(
-#     [rgb_hsv_ivy], [0, 1, 2], None, [8, 8, 8], [0, 256, 0, 256, 0, 256]
-# )
-
-# Normalize the histograms
-# hist_norm_r = cv2.normalize(rgb_hist, rgb_hist, 0, 255, cv2.NORM_MINMAX)
-# hist_norm_h = cv2.normalize(hsv_hist, hsv_hist, alpha=0, beta=1, normType=cv2.NORM_MINMAX)
-# hist_norm_b =
-# cv2.normalize(rgb_hsv_hist, rgb_hsv_hist, alpha=0, beta=1, normType=cv2.NORM_MINMAX)
-
-# hist_flat_r = hist_norm_r.flatten()
-# hist_flat_h = hist_norm_h.flatten()
-# hist_flat_b = hist_norm_b.flatten()
-
-# Compute the colors for the histogram bins
-# colors = []
-# for r in range(256):
-# for g in range(256):
-# for b in range(256):
-# colors.append((r / 255, g / 255, b / 255))
-
-# return hist_flat_r
-# Plot the histogram
-# plt.bar(range(len(hist_flat_r)), hist_flat_r, color=colors)
-
-# Broken
-# def display_hist(img):
-## Extract 2-D arrays of the RGB channels: red, green, blue
-# red, green, blue = img[:, :, 0], img[:, :, 1], img[:, :, 2]
-
-# red_pixels = red.flatten()
-# green_pixels = green.flatten()
-# blue_pixels = (
-# blue.flatten()
-# )  # Overlay histograms of the pixels of each color in the bottom subplot
-# fig, axes = plt.subplots(nrows=1, ncols=3, figsize=(18, 6))
-# axes = axes.ravel()
-
-# for pix, color, ax in zip(
-# [red_pixels, green_pixels, blue_pixels], ["red", "green", "blue"], axes
-# ):
-# ax.hist(pix, bins=256, density=False, color=color, alpha=0.5)
-
-## set labels and ticks
-# ax.set_xticks(ticks=np.linspace(0, 255, 17))
-# ax.set_xticklabels(labels=range(0, 257, 16), rotation=90)
-
-## limit the y range if desired
-## ax.set_ylim(0, 10000)
-
-## set the scale to log
-# ax.set_yscale("log")
-
-## Cosmetics
-# ax.set_title(f"Histogram from color {color}")
-# ax.set_ylabel("Counts")
-# ax.set_xlabel("Intensity")
-
-## Display the plot
-# plt.tight_layout()
-# plt.show()
 
 
 def display_hist_alt(img):
